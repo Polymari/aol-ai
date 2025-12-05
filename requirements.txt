@@ -1,0 +1,10 @@
+# Core dependencies
+opencv-python
+numpy
+
+# Server dependencies
+fastapi
+uvicorn
+
+# MediaPipe (requires Python < 3.12)
+mediapipe

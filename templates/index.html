@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Face Enrollment AI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            min-height: 100vh;
+            color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            width: 900px;
+            max-width: 100%;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid #eee;
+        }
+        .header h1 { margin: 0; color: #1e3c72; font-size: 24px; }
+        .content { display: flex; padding: 20px; gap: 20px; }
+        .video-box {
+            flex: 2;
+            background: #000;
+            border-radius: 15px;
+            overflow: hidden;
+            position: relative;
+            min-height: 480px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #video_feed { width: 100%; height: auto; display: block; }
+        .sidebar {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .panel {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            border: 1px solid #e9ecef;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: 0.2s;
+            margin-bottom: 5px;
+            color: white;
+        }
+        .btn-start { background: #4caf50; }
+        .btn-stop { background: #f44336; }
+        .btn-record { background: #ff9800; }
+        .btn-ready { background: #2196f3; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        
+        .face-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .face-tag {
+            background: white;
+            padding: 8px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+        }
+        .count-badge {
+            background: #1e3c72;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 12px;
+        }
+        .status {
+            text-align: center;
+            font-weight: bold;
+            margin-top: 10px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <h1>👁️ Face Enrollment System</h1>
+        <p>Advanced Biometric Registration</p>
+    </div>
+
+    <div class="content">
+        <!-- Video Stream from Python -->
+        <div class="video-box">
+            <img id="video_feed" src="{{ url_for('video_feed') }}" alt="Camera Stream">
+        </div>
+
+        <!-- Controls -->
+        <div class="sidebar">
+            <div class="panel">
+                <h3>1. Camera Control</h3>
+                <button onclick="sendCommand('start_camera')" class="btn-start">Start Camera</button>
+                <button onclick="sendCommand('stop_camera')" class="btn-stop">Stop Camera</button>
+            </div>
+
+            <div class="panel">
+                <h3>2. New Enrollment</h3>
+                <input type="text" id="nameInput" placeholder="Enter Name (e.g. Alex)">
+                <button id="btnInitEnroll" onclick="startEnrollment()" class="btn-ready">Set Name & Ready</button>
+                <button id="btnRec" onclick="toggleRecord()" class="btn-record" disabled>Start Recording</button>
+                <div class="status" id="statusMsg">System Idle</div>
+            </div>
+
+            <div class="panel">
+                <h3>Database Stats</h3>
+                <div class="face-list" id="faceList">Loading...</div>
+                <button class="btn-danger" onclick="clearDatabase()">
+                    🗑️ Wipe All Data
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    async function sendCommand(cmd, value="") {
+        const res = await fetch('/api/control', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({command: cmd, value: value})
+        });
+        return await res.json();
+    }
+
+    async function startEnrollment() {
+        const name = document.getElementById('nameInput').value;
+        if(!name) { alert("Please enter a name first!"); return; }
+        
+        const res = await sendCommand('start_enroll', name);
+        if(res.status) {
+            document.getElementById('statusMsg').innerText = "Ready. Press Record.";
+            document.getElementById('btnRec').disabled = false;
+            document.getElementById('btnRec').innerText = "🔴 Start Recording";
+            document.getElementById('btnInitEnroll').disabled = true;
+        }
+    }
+
+    async function toggleRecord() {
+        const btn = document.getElementById('btnRec');
+        const res = await sendCommand('toggle_record');
+        
+        if(res.status === "Recording Started") {
+            btn.innerText = "⏹️ Stop & Save";
+            btn.style.background = "#f44336";
+            document.getElementById('statusMsg').innerText = "Recording... Move Head.";
+        } else {
+            // Finished
+            btn.innerText = "Start Recording";
+            btn.style.background = "#ff9800";
+            btn.disabled = true;
+            document.getElementById('btnInitEnroll').disabled = false;
+            document.getElementById('nameInput').value = "";
+            document.getElementById('statusMsg').innerText = "Saved " + res.samples + " samples.";
+            refreshFaces();
+        }
+    }
+
+    async function refreshFaces() {
+        const res = await fetch('/api/faces');
+        const data = await res.json();
+        const list = document.getElementById('faceList');
+        list.innerHTML = "";
+        data.faces.forEach(name => {
+            const div = document.createElement('div');
+            div.className = 'face-tag';
+            div.innerHTML = `<span>${name}</span> <span class="count-badge">${data.counts[name]}</span>`;
+            list.appendChild(div);
+        });
+    }
+
+    // Refresh stats every 5 seconds
+    setInterval(refreshFaces, 5000);
+    refreshFaces();
+
+    async function clearDatabase() {
+    if(!confirm("Are you sure? This will delete ALL known faces.")) return;
+
+    try {
+        const response = await fetch('/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: 'clear_db' })
+        });
+        const data = await response.json();
+        // Assuming you have a log function or just alert the user
+        alert("Database Wiped Successfully.");
+        // Refresh the face list if you have one
+        if(typeof refreshFaces === 'function') refreshFaces();
+    } catch (err) {
+        console.error("Error clearing database.");
+        }
+    }
+</script>
+
+</body>
+</html>
