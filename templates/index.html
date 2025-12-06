@@ -137,6 +137,10 @@
         /* Camera Toggle Styles */
         .btn-camera-start { background: var(--success); }
         .btn-camera-stop { background: var(--danger); }
+        
+        /* Settings Button */
+        .btn-settings { background: #475569; margin-top: 0.5rem; }
+        .btn-settings:hover { background: #64748b; }
 
         /* Status Log */
         .status-box {
@@ -145,6 +149,32 @@
             color: #64748b;
             font-size: 0.9rem;
         }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(5px);
+        }
+        .modal-content {
+            background: var(--card);
+            padding: 2rem;
+            border-radius: 1rem;
+            width: 400px;
+            border: 1px solid #334155;
+            color: var(--text);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        .slider-group { margin-bottom: 1.5rem; }
+        .slider-group label { display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-weight: 600; color: #cbd5e1; }
+        .slider-group input { width: 100%; cursor: pointer; accent-color: var(--primary); }
+        .btn-close { background: transparent; border: 1px solid #475569; color: #94a3b8; margin-top: 0.5rem; }
+        .btn-close:hover { background: #334155; color: white; }
 
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
         @keyframes pulse-border { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
@@ -170,6 +200,9 @@
                 <button class="btn-danger" onclick="clearDatabase()">
                     🗑️ Wipe All Data
                 </button>
+                <button class="btn-settings" onclick="openSettings()">
+                    ⚙️ Recognition Settings
+                </button>
             </div>
 
             <!-- Enrollment -->
@@ -187,6 +220,28 @@
             <div class="status-box" id="statusLog">
                 > System Ready.<br>
             </div>
+        </div>
+    </div>
+
+    <!-- SETTINGS MODAL -->
+    <div id="settingsModal" class="modal">
+        <div class="modal-content">
+            <h2>⚙️ Adjust Parameters</h2>
+            
+            <div class="slider-group">
+                <label>Match Tolerance (Loose vs Strict) <span id="sensVal" style="color:var(--primary)">75</span></label>
+                <input type="range" id="sensitivity" min="40" max="90" value="75" oninput="document.getElementById('sensVal').innerText = this.value">
+                <small style="color:#64748b">Higher = Easier to match (but more errors)</small>
+            </div>
+
+            <div class="slider-group">
+                <label>Smoothing (Stability) <span id="smoothVal" style="color:var(--primary)">8</span></label>
+                <input type="range" id="smoothing" min="1" max="20" value="8" oninput="document.getElementById('smoothVal').innerText = this.value">
+                <small style="color:#64748b">Higher = Less flickering name tags</small>
+            </div>
+
+            <button class="btn-primary" onclick="saveSettings()">Save Changes</button>
+            <button class="btn-close" onclick="closeSettings()">Cancel</button>
         </div>
     </div>
 
@@ -215,13 +270,11 @@
                 const data = await sendCommand('toggle_camera');
                 
                 if (data.active) {
-                    // Camera IS Active -> Show STOP button
                     btn.innerText = "■ Stop Camera";
                     btn.classList.remove('btn-camera-start');
                     btn.classList.add('btn-camera-stop');
                     log("Camera Started.", "success");
                 } else {
-                    // Camera IS Stopped -> Show START button
                     btn.innerText = "▶ Start Camera";
                     btn.classList.remove('btn-camera-stop');
                     btn.classList.add('btn-camera-start');
@@ -269,6 +322,25 @@
             if(!confirm("Delete all face data?")) return;
             await sendCommand('clear_db');
             log("Database Wiped.", "error");
+        }
+
+        // --- 3. Settings Modal Logic ---
+        function openSettings() {
+            document.getElementById('settingsModal').style.display = 'flex';
+        }
+        function closeSettings() {
+            document.getElementById('settingsModal').style.display = 'none';
+        }
+        async function saveSettings() {
+            const sens = document.getElementById('sensitivity').value;
+            const smooth = document.getElementById('smoothing').value;
+            
+            // Send new settings to python
+            const payload = JSON.stringify({ sensitivity: parseInt(sens), smoothing: parseInt(smooth) });
+            await sendCommand('update_settings', payload);
+            
+            log(`Settings Updated (Tol:${sens}, Smooth:${smooth})`, "success");
+            closeSettings();
         }
     </script>
 </body>

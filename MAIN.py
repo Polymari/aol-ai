@@ -4,6 +4,7 @@ import numpy as np
 import os
 import time
 import pickle
+import json
 from collections import defaultdict, deque
 from flask import Flask, render_template, Response, request, jsonify
 
@@ -19,10 +20,13 @@ KNOWN_DIR = "known"
 DB_PATH = os.path.join("data", "faces_db.pkl")
 LOG_PATH = os.path.join("data", "events_log.csv")
 
-# Tuning
+# Global Tuning Variables (Mutable)
+tuning = {
+    "HAMMING_DISTANCE": 75,
+    "SMOOTH_FRAMES": 8
+}
+
 THRESHOLD_MATCHES = 12       
-HAMMING_DISTANCE = 75        
-SMOOTH_FRAMES = 8            
 BLINK_THRESHOLD = 0.22
 CAPTURE_EVERY_N_FRAMES = 2
 RECOGNITION_INTERVAL = 4     
@@ -35,8 +39,8 @@ state = {
     "enroll_name": "",
     "frame_counter": 0,
     "session_samples": 0,
-    "recent_names": deque(maxlen=SMOOTH_FRAMES),
-    "camera_active": False # Default to False so user must click Start
+    "recent_names": deque(maxlen=tuning["SMOOTH_FRAMES"]),
+    "camera_active": False
 }
 
 # ------------------------------
@@ -53,7 +57,7 @@ face_mesh = mp_face_mesh.FaceMesh(
 # ------------------------------
 # 2. UTILITIES (ORB & DB)
 # ------------------------------
-orb = cv2.ORB_create(nfeatures=1500)
+orb = cv2.ORB_create(nfeatures=1500) 
 bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
 
 def ensure_dirs():
@@ -97,7 +101,8 @@ def match_descriptors(des_query, db):
         for saved_des in saved_des_list:
             if saved_des is None: continue
             matches = bf.match(des_query, saved_des)
-            good_matches = [m for m in matches if m.distance < HAMMING_DISTANCE]
+            # Use mutable global tuning param
+            good_matches = [m for m in matches if m.distance < tuning["HAMMING_DISTANCE"]]
             count = len(good_matches)
             if count > max_matches_for_person:
                 max_matches_for_person = count
@@ -207,15 +212,13 @@ def generate_frames():
     frame_process_counter = 0
 
     while True:
-        # CAMERA PAUSE LOGIC:
         if not state["camera_active"]:
-            # Yield a blank frame or static image to keep the connection alive
             blank = np.zeros((480, 640, 3), dtype=np.uint8)
             cv2.putText(blank, "CAMERA PAUSED", (180, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
             ret, buffer = cv2.imencode('.jpg', blank, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
             frame = buffer.tobytes()
             yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            time.sleep(0.1) # Sleep to save CPU
+            time.sleep(0.1) 
             continue
 
         success, frame = cap.read()
@@ -336,11 +339,21 @@ def command():
                 os.remove(fp)
         return jsonify({"status": "Database Cleared"})
     
-    # NEW: Toggle Camera Logic
     elif cmd == 'toggle_camera':
         state['camera_active'] = not state['camera_active']
         status = "Camera Started" if state['camera_active'] else "Camera Paused"
         return jsonify({"status": status, "active": state['camera_active']})
+
+    # NEW: Update Settings Logic
+    elif cmd == 'update_settings':
+        try:
+            settings = json.loads(val)
+            tuning["HAMMING_DISTANCE"] = int(settings.get("sensitivity", 75))
+            tuning["SMOOTH_FRAMES"] = int(settings.get("smoothing", 8))
+            state["recent_names"] = deque(maxlen=tuning["SMOOTH_FRAMES"])
+            return jsonify({"status": "Settings Updated"})
+        except Exception as e:
+            return jsonify({"status": f"Error updating settings: {str(e)}"})
 
     return jsonify({"status": "Unknown Command"})
 
