@@ -3,235 +3,273 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Face Enrollment AI</title>
+    <title>BioLock AI Enrollment</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
-            min-height: 100vh;
-            color: #333;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
+        :root {
+            --primary: #6366f1;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
         }
-        .container {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            width: 900px;
-            max-width: 100%;
-            overflow: hidden;
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            height: 100vh;
             display: flex;
             flex-direction: column;
-        }
-        .header {
-            background: #f8f9fa;
-            padding: 20px;
-            text-align: center;
-            border-bottom: 1px solid #eee;
-        }
-        .header h1 { margin: 0; color: #1e3c72; font-size: 24px; }
-        .content { display: flex; padding: 20px; gap: 20px; }
-        .video-box {
-            flex: 2;
-            background: #000;
-            border-radius: 15px;
-            overflow: hidden;
-            position: relative;
-            min-height: 480px;
-            display: flex;
             align-items: center;
             justify-content: center;
         }
-        #video_feed { width: 100%; height: auto; display: block; }
-        .sidebar {
+
+        .main-container {
+            display: flex;
+            gap: 2rem;
+            max-width: 1200px;
+            width: 95%;
+            height: 80vh;
+        }
+
+        /* Video Section */
+        .video-wrapper {
+            flex: 2;
+            background: #000;
+            border-radius: 1.5rem;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+            border: 2px solid #334155;
+        }
+
+        #video_feed {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .live-badge {
+            position: absolute;
+            top: 1rem;
+            left: 1rem;
+            background: rgba(220, 38, 38, 0.9);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .live-badge::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            background: white;
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        /* Sidebar Controls */
+        .controls-wrapper {
             flex: 1;
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 1.5rem;
         }
-        .panel {
-            background: #f8f9fa;
-            padding: 15px;
-            border-radius: 10px;
-            border: 1px solid #e9ecef;
+
+        .card {
+            background: var(--card);
+            padding: 1.5rem;
+            border-radius: 1rem;
+            border: 1px solid #334155;
         }
+
+        h2 { font-size: 1.25rem; margin-bottom: 1rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
+
         input[type="text"] {
             width: 100%;
-            padding: 12px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            font-size: 16px;
+            background: #334155;
+            border: 1px solid #475569;
+            color: white;
+            padding: 1rem;
+            border-radius: 0.75rem;
+            font-size: 1rem;
+            margin-bottom: 1rem;
+            transition: 0.2s;
         }
+
+        input:focus { outline: none; border-color: var(--primary); }
+
         button {
             width: 100%;
-            padding: 12px;
+            padding: 1rem;
+            border-radius: 0.75rem;
             border: none;
-            border-radius: 8px;
-            font-weight: bold;
+            font-weight: 600;
+            font-size: 1rem;
             cursor: pointer;
-            transition: 0.2s;
-            margin-bottom: 5px;
+            transition: transform 0.1s, opacity 0.2s;
             color: white;
+            margin-bottom: 0.5rem;
         }
-        .btn-start { background: #4caf50; }
-        .btn-stop { background: #f44336; }
-        .btn-record { background: #ff9800; }
-        .btn-ready { background: #2196f3; }
-        button:disabled { opacity: 0.6; cursor: not-allowed; }
-        
-        .face-list {
-            max-height: 200px;
-            overflow-y: auto;
+
+        button:active { transform: scale(0.98); }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .btn-primary { background: var(--primary); }
+        .btn-primary:hover { background: #4f46e5; }
+
+        .btn-record { background: var(--success); display: none; }
+        .btn-record.recording { background: var(--danger); animation: pulse-border 2s infinite; }
+
+        .btn-danger { background: rgba(239, 68, 68, 0.2); color: var(--danger); border: 1px solid var(--danger); }
+        .btn-danger:hover { background: rgba(239, 68, 68, 0.3); }
+
+        /* Camera Toggle Styles */
+        .btn-camera-start { background: var(--success); }
+        .btn-camera-stop { background: var(--danger); }
+
+        /* Status Log */
+        .status-box {
+            margin-top: auto;
+            font-family: monospace;
+            color: #64748b;
+            font-size: 0.9rem;
         }
-        .face-tag {
-            background: white;
-            padding: 8px;
-            margin-bottom: 5px;
-            border-radius: 5px;
-            border: 1px solid #ddd;
-            display: flex;
-            justify-content: space-between;
-            font-size: 14px;
-        }
-        .count-badge {
-            background: #1e3c72;
-            color: white;
-            padding: 2px 6px;
-            border-radius: 10px;
-            font-size: 12px;
-        }
-        .status {
-            text-align: center;
-            font-weight: bold;
-            margin-top: 10px;
-            color: #666;
-        }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        @keyframes pulse-border { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <div class="header">
-        <h1>👁️ Face Enrollment System</h1>
-        <p>Advanced Biometric Registration</p>
-    </div>
-
-    <div class="content">
-        <!-- Video Stream from Python -->
-        <div class="video-box">
-            <img id="video_feed" src="{{ url_for('video_feed') }}" alt="Camera Stream">
+    <div class="main-container">
+        <div class="video-wrapper">
+            <div class="live-badge">LIVE FEED</div>
+            <img id="video_feed" src="{{ url_for('video_feed') }}" alt="Connect Camera">
         </div>
 
-        <!-- Controls -->
-        <div class="sidebar">
-            <div class="panel">
-                <h3>1. Camera Control</h3>
-                <button onclick="sendCommand('start_camera')" class="btn-start">Start Camera</button>
-                <button onclick="sendCommand('stop_camera')" class="btn-stop">Stop Camera</button>
-            </div>
-
-            <div class="panel">
-                <h3>2. New Enrollment</h3>
-                <input type="text" id="nameInput" placeholder="Enter Name (e.g. Alex)">
-                <button id="btnInitEnroll" onclick="startEnrollment()" class="btn-ready">Set Name & Ready</button>
-                <button id="btnRec" onclick="toggleRecord()" class="btn-record" disabled>Start Recording</button>
-                <div class="status" id="statusMsg">System Idle</div>
-            </div>
-
-            <div class="panel">
-                <h3>Database Stats</h3>
-                <div class="face-list" id="faceList">Loading...</div>
+        <div class="controls-wrapper">
+            
+            <!-- Camera Control -->
+            <div class="card">
+                <h2>1. System Control</h2>
+                <!-- SINGLE TOGGLE BUTTON -->
+                <button id="btnCamToggle" class="btn-camera-start" onclick="toggleCamera()">
+                    ▶ Start Camera
+                </button>
                 <button class="btn-danger" onclick="clearDatabase()">
                     🗑️ Wipe All Data
                 </button>
             </div>
+
+            <!-- Enrollment -->
+            <div class="card">
+                <h2>2. Enrollment</h2>
+                <input type="text" id="nameInput" placeholder="Enter Full Name..." autocomplete="off">
+                <button id="btnInit" class="btn-primary" onclick="startEnrollment()">
+                    Start Enrollment Session
+                </button>
+                <button id="btnRecord" class="btn-record" onclick="toggleRecord()">
+                    ● Start Recording
+                </button>
+            </div>
+
+            <div class="status-box" id="statusLog">
+                > System Ready.<br>
+            </div>
         </div>
     </div>
-</div>
 
-<script>
-    async function sendCommand(cmd, value="") {
-        const res = await fetch('/api/control', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({command: cmd, value: value})
-        });
-        return await res.json();
-    }
-
-    async function startEnrollment() {
-        const name = document.getElementById('nameInput').value;
-        if(!name) { alert("Please enter a name first!"); return; }
-        
-        const res = await sendCommand('start_enroll', name);
-        if(res.status) {
-            document.getElementById('statusMsg').innerText = "Ready. Press Record.";
-            document.getElementById('btnRec').disabled = false;
-            document.getElementById('btnRec').innerText = "🔴 Start Recording";
-            document.getElementById('btnInitEnroll').disabled = true;
+    <script>
+        function log(msg, type='neutral') {
+            const box = document.getElementById('statusLog');
+            let color = '#94a3b8';
+            if(type === 'success') color = '#22c55e';
+            if(type === 'error') color = '#ef4444';
+            box.innerHTML = `> <span style="color:${color}">${msg}</span><br>` + box.innerHTML;
         }
-    }
 
-    async function toggleRecord() {
-        const btn = document.getElementById('btnRec');
-        const res = await sendCommand('toggle_record');
-        
-        if(res.status === "Recording Started") {
-            btn.innerText = "⏹️ Stop & Save";
-            btn.style.background = "#f44336";
-            document.getElementById('statusMsg').innerText = "Recording... Move Head.";
-        } else {
-            // Finished
-            btn.innerText = "Start Recording";
-            btn.style.background = "#ff9800";
-            btn.disabled = true;
-            document.getElementById('btnInitEnroll').disabled = false;
-            document.getElementById('nameInput').value = "";
-            document.getElementById('statusMsg').innerText = "Saved " + res.samples + " samples.";
-            refreshFaces();
+        async function sendCommand(cmd, value="") {
+            const res = await fetch('/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: cmd, value: value })
+            });
+            return await res.json();
         }
-    }
 
-    async function refreshFaces() {
-        const res = await fetch('/api/faces');
-        const data = await res.json();
-        const list = document.getElementById('faceList');
-        list.innerHTML = "";
-        data.faces.forEach(name => {
-            const div = document.createElement('div');
-            div.className = 'face-tag';
-            div.innerHTML = `<span>${name}</span> <span class="count-badge">${data.counts[name]}</span>`;
-            list.appendChild(div);
-        });
-    }
-
-    // Refresh stats every 5 seconds
-    setInterval(refreshFaces, 5000);
-    refreshFaces();
-
-    async function clearDatabase() {
-    if(!confirm("Are you sure? This will delete ALL known faces.")) return;
-
-    try {
-        const response = await fetch('/command', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command: 'clear_db' })
-        });
-        const data = await response.json();
-        // Assuming you have a log function or just alert the user
-        alert("Database Wiped Successfully.");
-        // Refresh the face list if you have one
-        if(typeof refreshFaces === 'function') refreshFaces();
-    } catch (err) {
-        console.error("Error clearing database.");
+        // --- 1. Camera Toggle Logic ---
+        async function toggleCamera() {
+            const btn = document.getElementById('btnCamToggle');
+            try {
+                const data = await sendCommand('toggle_camera');
+                
+                if (data.active) {
+                    // Camera IS Active -> Show STOP button
+                    btn.innerText = "■ Stop Camera";
+                    btn.classList.remove('btn-camera-start');
+                    btn.classList.add('btn-camera-stop');
+                    log("Camera Started.", "success");
+                } else {
+                    // Camera IS Stopped -> Show START button
+                    btn.innerText = "▶ Start Camera";
+                    btn.classList.remove('btn-camera-stop');
+                    btn.classList.add('btn-camera-start');
+                    log("Camera Paused.", "neutral");
+                }
+            } catch (err) {
+                log("Backend Error", "error");
+            }
         }
-    }
-</script>
 
+        // --- 2. Enrollment Logic ---
+        async function startEnrollment() {
+            const name = document.getElementById('nameInput').value.trim();
+            if (!name) { log("Enter name first!", "error"); return; }
+
+            const data = await sendCommand('start_enroll', name);
+            if (data.status) {
+                log(`Session: ${data.name}`, "success");
+                document.getElementById('btnInit').style.display = 'none';
+                document.getElementById('nameInput').disabled = true;
+                document.getElementById('btnRecord').style.display = 'block';
+            }
+        }
+
+        async function toggleRecord() {
+            const btn = document.getElementById('btnRecord');
+            const data = await sendCommand('toggle_record');
+            
+            if (data.status === "Recording...") {
+                btn.classList.add('recording');
+                btn.innerText = "■ Stop & Save";
+                log("Recording...", "success");
+            } else {
+                btn.classList.remove('recording');
+                btn.style.display = 'none';
+                document.getElementById('btnInit').style.display = 'block';
+                document.getElementById('nameInput').disabled = false;
+                document.getElementById('nameInput').value = "";
+                btn.innerText = "● Start Recording";
+                log("Saved Data.", "success");
+            }
+        }
+
+        async function clearDatabase() {
+            if(!confirm("Delete all face data?")) return;
+            await sendCommand('clear_db');
+            log("Database Wiped.", "error");
+        }
+    </script>
 </body>
 </html>
