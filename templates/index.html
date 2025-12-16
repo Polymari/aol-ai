@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,7 +16,11 @@
             --text: #f8fafc;
         }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
 
         body {
             font-family: 'Inter', sans-serif;
@@ -93,7 +98,13 @@
             border: 1px solid #334155;
         }
 
-        h2 { font-size: 1.25rem; margin-bottom: 1rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
+        h2 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
 
         input[type="text"] {
             width: 100%;
@@ -107,7 +118,10 @@
             transition: 0.2s;
         }
 
-        input:focus { outline: none; border-color: var(--primary); }
+        input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
 
         button {
             width: 100%;
@@ -122,25 +136,61 @@
             margin-bottom: 0.5rem;
         }
 
-        button:active { transform: scale(0.98); }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button:active {
+            transform: scale(0.98);
+        }
 
-        .btn-primary { background: var(--primary); }
-        .btn-primary:hover { background: #4f46e5; }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
 
-        .btn-record { background: var(--success); display: none; }
-        .btn-record.recording { background: var(--danger); animation: pulse-border 2s infinite; }
+        .btn-primary {
+            background: var(--primary);
+        }
 
-        .btn-danger { background: rgba(239, 68, 68, 0.2); color: var(--danger); border: 1px solid var(--danger); }
-        .btn-danger:hover { background: rgba(239, 68, 68, 0.3); }
+        .btn-primary:hover {
+            background: #4f46e5;
+        }
+
+        .btn-record {
+            background: var(--success);
+            display: none;
+        }
+
+        .btn-record.recording {
+            background: var(--danger);
+            animation: pulse-border 2s infinite;
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+
+        .btn-danger:hover {
+            background: rgba(239, 68, 68, 0.3);
+        }
 
         /* Camera Toggle Styles */
-        .btn-camera-start { background: var(--success); }
-        .btn-camera-stop { background: var(--danger); }
-        
+        .btn-camera-start {
+            background: var(--success);
+        }
+
+        .btn-camera-stop {
+            background: var(--danger);
+        }
+
         /* Settings Button */
-        .btn-settings { background: #475569; margin-top: 0.5rem; }
-        .btn-settings:hover { background: #64748b; }
+        .btn-settings {
+            background: #475569;
+            margin-top: 0.5rem;
+        }
+
+        .btn-settings:hover {
+            background: #64748b;
+        }
 
         /* Status Log */
         .status-box {
@@ -154,13 +204,17 @@
         .modal {
             display: none;
             position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.8);
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
             z-index: 1000;
             justify-content: center;
             align-items: center;
             backdrop-filter: blur(5px);
         }
+
         .modal-content {
             background: var(--card);
             padding: 2rem;
@@ -170,16 +224,67 @@
             color: var(--text);
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
         }
-        .slider-group { margin-bottom: 1.5rem; }
-        .slider-group label { display: flex; justify-content: space-between; margin-bottom: 0.5rem; font-weight: 600; color: #cbd5e1; }
-        .slider-group input { width: 100%; cursor: pointer; accent-color: var(--primary); }
-        .btn-close { background: transparent; border: 1px solid #475569; color: #94a3b8; margin-top: 0.5rem; }
-        .btn-close:hover { background: #334155; color: white; }
 
-        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
-        @keyframes pulse-border { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+        .slider-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .slider-group label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #cbd5e1;
+        }
+
+        .slider-group input {
+            width: 100%;
+            cursor: pointer;
+            accent-color: var(--primary);
+        }
+
+        .btn-close {
+            background: transparent;
+            border: 1px solid #475569;
+            color: #94a3b8;
+            margin-top: 0.5rem;
+        }
+
+        .btn-close:hover {
+            background: #334155;
+            color: white;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+
+            100% {
+                opacity: 1;
+            }
+        }
+
+        @keyframes pulse-border {
+            0% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+            }
+
+            70% {
+                box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+            }
+        }
     </style>
 </head>
+
 <body>
 
     <div class="main-container">
@@ -189,7 +294,7 @@
         </div>
 
         <div class="controls-wrapper">
-            
+
             <!-- Camera Control -->
             <div class="card">
                 <h2>1. System Control</h2>
@@ -227,17 +332,25 @@
     <div id="settingsModal" class="modal">
         <div class="modal-content">
             <h2>⚙️ Adjust Parameters</h2>
-            
+
             <div class="slider-group">
-                <label>Match Tolerance (Loose vs Strict) <span id="sensVal" style="color:var(--primary)">75</span></label>
-                <input type="range" id="sensitivity" min="40" max="90" value="75" oninput="document.getElementById('sensVal').innerText = this.value">
+                <label>Match Tolerance (Loose vs Strict) <span id="sensVal"
+                        style="color:var(--primary)">75</span></label>
+                <input type="range" id="sensitivity" min="40" max="90" value="75"
+                    oninput="document.getElementById('sensVal').innerText = this.value">
                 <small style="color:#64748b">Higher = Easier to match (but more errors)</small>
             </div>
 
             <div class="slider-group">
                 <label>Smoothing (Stability) <span id="smoothVal" style="color:var(--primary)">8</span></label>
-                <input type="range" id="smoothing" min="1" max="20" value="8" oninput="document.getElementById('smoothVal').innerText = this.value">
+                <input type="range" id="smoothing" min="1" max="20" value="8"
+                    oninput="document.getElementById('smoothVal').innerText = this.value">
                 <small style="color:#64748b">Higher = Less flickering name tags</small>
+            </div>
+
+            <div class="slider-group" style="display: flex; align-items: center; justify-content: space-between;">
+                <label style="margin:0">🚨 Intruder Alert Mode</label>
+                <input type="checkbox" id="intruderToggle" checked style="width: 20px; height: 20px;">
             </div>
 
             <button class="btn-primary" onclick="saveSettings()">Save Changes</button>
@@ -246,15 +359,15 @@
     </div>
 
     <script>
-        function log(msg, type='neutral') {
+        function log(msg, type = 'neutral') {
             const box = document.getElementById('statusLog');
             let color = '#94a3b8';
-            if(type === 'success') color = '#22c55e';
-            if(type === 'error') color = '#ef4444';
+            if (type === 'success') color = '#22c55e';
+            if (type === 'error') color = '#ef4444';
             box.innerHTML = `> <span style="color:${color}">${msg}</span><br>` + box.innerHTML;
         }
 
-        async function sendCommand(cmd, value="") {
+        async function sendCommand(cmd, value = "") {
             const res = await fetch('/command', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -268,7 +381,7 @@
             const btn = document.getElementById('btnCamToggle');
             try {
                 const data = await sendCommand('toggle_camera');
-                
+
                 if (data.active) {
                     btn.innerText = "■ Stop Camera";
                     btn.classList.remove('btn-camera-start');
@@ -302,7 +415,7 @@
         async function toggleRecord() {
             const btn = document.getElementById('btnRecord');
             const data = await sendCommand('toggle_record');
-            
+
             if (data.status === "Recording...") {
                 btn.classList.add('recording');
                 btn.innerText = "■ Stop & Save";
@@ -319,7 +432,7 @@
         }
 
         async function clearDatabase() {
-            if(!confirm("Delete all face data?")) return;
+            if (!confirm("Delete all face data?")) return;
             await sendCommand('clear_db');
             log("Database Wiped.", "error");
         }
@@ -334,14 +447,31 @@
         async function saveSettings() {
             const sens = document.getElementById('sensitivity').value;
             const smooth = document.getElementById('smoothing').value;
-            
+            const intruder = document.getElementById('intruderToggle').checked;
+
             // Send new settings to python
-            const payload = JSON.stringify({ sensitivity: parseInt(sens), smoothing: parseInt(smooth) });
+            const payload = JSON.stringify({
+                sensitivity: parseInt(sens),
+                smoothing: parseInt(smooth),
+                intruder_alert: intruder
+            });
             await sendCommand('update_settings', payload);
-            
+
             log(`Settings Updated (Tol:${sens}, Smooth:${smooth})`, "success");
             closeSettings();
         }
+
+        // --- 4. Status Polling ---
+        setInterval(async () => {
+            try {
+                const res = await fetch('/api/status_updates');
+                const data = await res.json();
+                if (data.alert) {
+                    log("🚨 " + data.alert, "error");
+                }
+            } catch (e) { }
+        }, 1000);
     </script>
 </body>
+
 </html>
