@@ -6,6 +6,8 @@ import time
 import pickle
 import json
 import random
+import threading
+import queue
 from datetime import datetime
 from collections import defaultdict, deque
 from flask import Flask, render_template, Response, request, jsonify
@@ -51,7 +53,8 @@ state = {
     "liveness_state": "WAITING", # WAITING, CHALLENGE, VERIFIED
     "liveness_target": "",       # BLINK, SMILE
     "liveness_timer": 0,
-    "latest_alert": None         # Queue for UI messages
+    "latest_alert": None,        # Queue for UI messages
+    "privacy_mode": False        # True if user is looking away
 }
 
 
@@ -61,7 +64,7 @@ state = {
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
     max_num_faces=1,
-    refine_landmarks=True,
+    refine_landmarks=False, # Optimization: Turn off Iris tracking
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5
 )
@@ -76,6 +79,15 @@ def ensure_dirs():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     os.makedirs(KNOWN_DIR, exist_ok=True)
     os.makedirs(SECURITY_LOG_DIR, exist_ok=True)
+
+    os.makedirs(SECURITY_LOG_DIR, exist_ok=True)
+
+def prune_db(db, max_samples=50):
+    for name in db:
+        if len(db[name]) > max_samples:
+            # Keep random 50 samples to maintain variety
+            db[name] = random.sample(db[name], max_samples)
+    return db
 
 def load_db():
     if not os.path.exists(DB_PATH): return {}
@@ -171,7 +183,7 @@ def get_head_pose(landmarks, w, h):
     success, rot_vec, trans_vec = cv2.solvePnP(face_3d, face_2d, cam_matrix, dist_matrix)
     rmat, _ = cv2.Rodrigues(rot_vec)
     angles, _, _, _, _, _ = cv2.RQDecomp3x3(rmat)
-    return angles[0] * 360, angles[1] * 360, angles[2] * 360
+    return angles[0], angles[1], angles[2]
 
 def draw_recording_overlay(frame, is_recording, sample_count):
     h, w, _ = frame.shape
@@ -206,6 +218,54 @@ def get_stable_roi(lms, w, h):
     y2 = int(y1 + box_h)
     
     return (max(0, x1), max(0, y1), min(w, x2) - max(0, x1), min(h, y2) - max(0, y1))
+
+    return (max(0, x1), max(0, y1), min(w, x2) - max(0, x1), min(h, y2) - max(0, y1))
+
+# ------------------------------
+# 4A. ASYNC RECOGNITION WORKER
+# ------------------------------
+class RecognitionWorker:
+    def __init__(self, db_ref):
+        self.db = db_ref
+        self.input_queue = queue.Queue(maxsize=1) # Only buffer 1 frame
+        self.latest_result = ("Unknown", 0)
+        self.lock = threading.Lock()
+        self.running = True
+        self.thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self.thread.start()
+    
+    def _worker_loop(self):
+        while self.running:
+            try:
+                # Wait for a new ROI to process
+                roi = self.input_queue.get(timeout=1)
+                
+                # Heavy lifting happens here (OFF main thread)
+                des = compute_orb(roi)
+                name, score = match_descriptors(des, self.db)
+                
+                with self.lock:
+                    self.latest_result = (name, score)
+                    
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"[!] Worker Error: {e}")
+
+    def process(self, roi):
+        # Non-blocking put (drop frame if busy)
+        if not self.input_queue.full():
+            self.input_queue.put(roi)
+
+    def get_latest_result(self):
+        with self.lock:
+            return self.latest_result
+
+    def update_db(self, new_db):
+        self.db = new_db
+
+# Initialize Worker
+rec_worker = RecognitionWorker(db)
 
 # ------------------------------
 # 4. VIDEO GENERATOR LOOP
@@ -256,7 +316,10 @@ def generate_frames():
 
         # AI Processing
         if should_process_ai:
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Optimization: Resize to 50% for faster inference (320x240)
+            # Normalized landmarks work on any scale, so no coordinate math changes needed!
+            small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+            rgb = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
             last_results = face_mesh.process(rgb)
         
         # Drawing Logic (Uses last_results)
@@ -275,7 +338,18 @@ def generate_frames():
                     try: 
                         p, y, r = get_head_pose(lms, w, h)
                         cached_pose = f"P:{int(p)} Y:{int(y)}"
-                    except: pass
+                        
+                        # --- ATTENTION GUARD LOGIC ---
+                        # Relaxed Thresholds: Yaw > 50 or Pitch > 35
+                        # This allows looking at the screen with head slightly turned.
+                        if abs(y) > 50 or abs(p) > 35:
+                            state["privacy_mode"] = True
+                        else:
+                            state["privacy_mode"] = False
+                            
+                    except: 
+                        state["privacy_mode"] = False # Default to open if calculation fails
+                        pass
                     
                     l_ear = calculate_ear(lms, LEFT_EYE, w, h)
                     r_ear = calculate_ear(lms, RIGHT_EYE, w, h)
@@ -307,12 +381,17 @@ def generate_frames():
                 elif roi.size > 0:
                     # Recognition Logic
                     if should_process_ai and (frame_process_counter % (RECOGNITION_INTERVAL * process_stride) == 0):
-                        des = compute_orb(roi)
-                        name, score = match_descriptors(des, db)
-                        state["recent_names"].append(name)
-                        if state["recent_names"]:
-                            final_name = max(set(state["recent_names"]), key=state["recent_names"].count)
-                        else: final_name = "Unknown"
+                        # Async Submit
+                        rec_worker.process(roi)
+                        
+                    # Always get latest (instant)
+                    final_name, score = rec_worker.get_latest_result()
+                    
+                    if True: # Logic block for drawing based on latest async result
+                        state["recent_names"].append(final_name)
+                        # Optional: Keep smoothing logic if desired, or trust the worker result
+                        # For simple async, just use final_name directly or smooth it.
+                        # Let's use final_name from worker directly for responsiveness.
                         
                         if score < THRESHOLD_MATCHES: final_name = "Unknown"
                         
@@ -326,11 +405,9 @@ def generate_frames():
                             
                             if tuning["INTRUDER_ALERT"]:
                                 state["intruder_timer"] += 1
-                                # Logic runs every (RECOGNITION_INTERVAL * process_stride) frames.
-                                # Interval=4, Stride=2 => Runs every 8 frames.
-                                # 30 FPS / 8 = 3.75 checks per second.
-                                # To wait 5 seconds: 5 * 3.75 = ~18-20 ticks.
-                                if state["intruder_timer"] > 20: 
+                                # Logic now runs every frame at ~30 FPS due to Async Worker.
+                                # To wait 5 seconds: 5 * 30 = 150 frames.
+                                if state["intruder_timer"] > 150: 
                                     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                                     path = os.path.join(SECURITY_LOG_DIR, f"intruder_{ts}.jpg")
                                     cv2.imwrite(path, frame)
@@ -427,6 +504,12 @@ def command():
             if not state["is_recording"]:
                 save_db(db)
                 state["enroll_mode"] = False
+                
+                # Prune DB after new enrollment
+                prune_db(db)
+                save_db(db) # Save again after pruning
+                rec_worker.update_db(db) # Update worker with new data
+                
                 return jsonify({"status": "Saved & Finished", "samples": state["session_samples"]})
             return jsonify({"status": "Recording..."})
         else:
@@ -476,10 +559,15 @@ def get_faces():
 @app.route('/api/status_updates')
 def status_updates():
     alert = state.get("latest_alert")
+    privacy = state.get("privacy_mode", False)
+    
+    response = {"privacy": privacy}
+    
     if alert:
         state["latest_alert"] = None # Clear after reading
-        return jsonify({"alert": alert})
-    return jsonify({})
+        response["alert"] = alert
+        
+    return jsonify(response)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, threaded=True, debug=False)
