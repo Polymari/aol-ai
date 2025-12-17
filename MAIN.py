@@ -27,13 +27,13 @@ LOG_PATH = os.path.join("data", "events_log.csv")
 
 # Global Tuning Variables (Mutable)
 tuning = {
-    "HAMMING_DISTANCE": 75,
+    "HAMMING_DISTANCE": 55,
     "SMOOTH_FRAMES": 8,
     "INTRUDER_ALERT": True
 }
 
 
-THRESHOLD_MATCHES = 12       
+THRESHOLD_MATCHES = 150       
 BLINK_THRESHOLD = 0.22
 CAPTURE_EVERY_N_FRAMES = 2
 RECOGNITION_INTERVAL = 4     
@@ -63,7 +63,7 @@ state = {
 # ------------------------------
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(
-    max_num_faces=1,
+    max_num_faces=2,
     refine_landmarks=False, # Optimization: Turn off Iris tracking
     min_detection_confidence=0.5,
     min_tracking_confidence=0.5
@@ -80,7 +80,6 @@ def ensure_dirs():
     os.makedirs(KNOWN_DIR, exist_ok=True)
     os.makedirs(SECURITY_LOG_DIR, exist_ok=True)
 
-    os.makedirs(SECURITY_LOG_DIR, exist_ok=True)
 
 def prune_db(db, max_samples=50):
     for name in db:
@@ -152,18 +151,34 @@ def calculate_ear(landmarks, indices, w, h):
 
 def detect_emotion(landmarks):
     try:
+        # Landmarks: 
+        # 0: Upper Lip Top, 13: Upper Lip Inner, 14: Lower Lip Inner
+        # 61: Left Mouth Corner, 291: Right Mouth Corner
+        
         left_corner = landmarks[61]
         right_corner = landmarks[291]
-        upper_lip_center = landmarks[0]
-        corners_avg_y = (left_corner.y + right_corner.y) / 2
-        smile_intensity = (upper_lip_center.y - corners_avg_y) * 100
+        upper_lip = landmarks[0]
         
-        top_lip = landmarks[13]
-        bottom_lip = landmarks[14]
-        mouth_open = (bottom_lip.y - top_lip.y) * 100
+        # Calculate Y-coordinates rel to lip center
+        corners_avg_y = (left_corner.y + right_corner.y) / 2.0
+        lip_y = upper_lip.y
+        
+        # Smile: Corners are HIGHER (smaller Y) than lip
+        # Frown: Corners are LOWER (larger Y) than lip
+        
+        # Diff > 0 means smile (corners above lip), Diff < 0 means frown
+        # Value is relative to face size usually, but we multiply by 100 for a score
+        
+        curvature = (lip_y - corners_avg_y) * 100
+        
+        top_lip_inner = landmarks[13]
+        bottom_lip_inner = landmarks[14]
+        mouth_open = (bottom_lip_inner.y - top_lip_inner.y) * 100
 
-        if mouth_open > 5.0: return "SURPRISED"
-        elif smile_intensity > 2.0: return "HAPPY"
+        # Tuning Thresholds
+        if mouth_open > 3.0: return "SURPRISED"    # Slightly more sensitive (was 5.0)
+        elif curvature > 2.5: return "HAPPY"       # Stricter smile (was 2.0)
+        elif curvature < -2.0: return "FROWN"      # New Frown logic
         else: return "NEUTRAL"
     except: return "NEUTRAL"
 
@@ -227,8 +242,8 @@ def get_stable_roi(lms, w, h):
 class RecognitionWorker:
     def __init__(self, db_ref):
         self.db = db_ref
-        self.input_queue = queue.Queue(maxsize=1) # Only buffer 1 frame
-        self.latest_result = ("Unknown", 0)
+        self.input_queue = queue.Queue(maxsize=4) # Buffer a few frames
+        self.latest_results = {} # Key: face_index, Value: (name, score)
         self.lock = threading.Lock()
         self.running = True
         self.thread = threading.Thread(target=self._worker_loop, daemon=True)
@@ -238,28 +253,30 @@ class RecognitionWorker:
         while self.running:
             try:
                 # Wait for a new ROI to process
-                roi = self.input_queue.get(timeout=1)
+                # Item is (roi, face_index)
+                item = self.input_queue.get(timeout=1)
+                roi, idx = item
                 
                 # Heavy lifting happens here (OFF main thread)
                 des = compute_orb(roi)
                 name, score = match_descriptors(des, self.db)
                 
                 with self.lock:
-                    self.latest_result = (name, score)
+                    self.latest_results[idx] = (name, score)
                     
             except queue.Empty:
                 continue
             except Exception as e:
                 print(f"[!] Worker Error: {e}")
 
-    def process(self, roi):
+    def process(self, roi, idx):
         # Non-blocking put (drop frame if busy)
         if not self.input_queue.full():
-            self.input_queue.put(roi)
+            self.input_queue.put((roi, idx))
 
-    def get_latest_result(self):
+    def get_latest_results(self):
         with self.lock:
-            return self.latest_result
+            return self.latest_results.copy()
 
     def update_db(self, new_db):
         self.db = new_db
@@ -275,199 +292,192 @@ def generate_frames():
     # Optional: Lower resolution to 320x240 for even more speed if needed
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    cap.set(cv2.CAP_PROP_FPS, 30)
     
+    print("[*] Camera Initialized")
+    if not cap.isOpened():
+        print("[!] Error: Could not open camera completely.")
+
     LEFT_EYE = [33, 160, 158, 133, 153, 144]
     RIGHT_EYE = [362, 385, 387, 263, 373, 380]
 
-    cached_name = "Unknown"
-    cached_score = 0
-    cached_color = (0, 0, 255)
-    
+    # Per-face caching (Key: face_index)
+    cache_data = defaultdict(lambda: {
+        "name": "Unknown", "score": 0, "color": (0, 0, 255),
+        "pose": "", "blink": "", "emotion": "", "liveness_msg": ""
+    })
+
     # AI Skipping State
     frame_process_counter = 0
     process_stride = 2   # Process 1 frame, skip 1 frame (Increase for more speed)
     last_results = None
-    
-    # Caching text for skipped frames
-    cached_pose = ""
-    cached_blink = ""
-    cached_emotion = ""
-    cached_liveness_msg = "" # Message to show user
 
     while True:
-        if not state["camera_active"]:
-            blank = np.zeros((480, 640, 3), dtype=np.uint8)
-            cv2.putText(blank, "CAMERA PAUSED", (180, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            ret, buffer = cv2.imencode('.jpg', blank, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
+        try:
+            if not state["camera_active"]:
+                blank = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(blank, "CAMERA PAUSED", (180, 240), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                ret, buffer = cv2.imencode('.jpg', blank, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
+                frame = buffer.tobytes()
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                time.sleep(0.1) 
+                continue
+
+            success, frame = cap.read()
+            if not success: 
+                print("[!] Error: Failed to read frame (stream end?). Retrying...")
+                time.sleep(0.1)
+                continue
+            
+            frame = cv2.flip(frame, 1)
+            # Force frame to standard size to ensure consistent processing
+            frame = cv2.resize(frame, (640, 480))
+            h, w, _ = frame.shape
+            
+            frame_process_counter += 1
+            should_process_ai = (frame_process_counter % process_stride == 0)
+
+            # AI Processing
+            if should_process_ai:
+                # Optimization: Resize to 50% for faster inference (320x240)
+                small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
+                rgb = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+                last_results = face_mesh.process(rgb)
+            
+            # Drawing Logic (Uses last_results)
+            if last_results and last_results.multi_face_landmarks:
+                for idx, face_landmarks in enumerate(last_results.multi_face_landmarks):
+                    lms = face_landmarks.landmark
+                    d = cache_data[idx] # Point to this face's data dictionary
+
+                    if should_process_ai:
+                        try: 
+                            p, y, r = get_head_pose(lms, w, h)
+                            d["pose"] = f"P:{int(p)} Y:{int(y)}"
+                            
+                            # --- ATTENTION GUARD LOGIC ---
+                            if abs(y) > 50 or abs(p) > 35:
+                                if idx == 0: state["privacy_mode"] = True
+                            else:
+                                if idx == 0: state["privacy_mode"] = False
+                                
+                        except: 
+                            if idx == 0: state["privacy_mode"] = False
+                            pass
+                        
+                        l_ear = calculate_ear(lms, LEFT_EYE, w, h)
+                        r_ear = calculate_ear(lms, RIGHT_EYE, w, h)
+                        is_blinking = ((l_ear + r_ear) / 2.0) < BLINK_THRESHOLD
+                        d["blink"] = "BLINKING" if is_blinking else "Eyes Open"
+                        d["emotion"] = detect_emotion(lms)
+                    
+                    # Draw using cached or fresh data
+                    x, y, bw, bh = get_stable_roi(lms, w, h)
+                    
+                    # Only use Face 0 for Enrollment
+                    if state["enroll_mode"] and idx == 0:
+                        cv2.rectangle(frame, (x, y), (x+bw, y+bh), (0, 255, 255), 2)
+                        roi = frame[y:y+bh, x:x+bw]
+
+                        if state["is_recording"] and roi.size > 0:
+                            if should_process_ai:
+                                state["frame_counter"] += 1
+                                if state["frame_counter"] % CAPTURE_EVERY_N_FRAMES == 0:
+                                    des = compute_orb(roi)
+                                    if des is not None:
+                                        nm = state["enroll_name"]
+                                        if nm not in db: db[nm] = []
+                                        db[nm].append(des)
+                                        state["session_samples"] += 1
+                                        if state["session_samples"] == 1:
+                                            cv2.imwrite(f"{KNOWN_DIR}/{nm}_thumb.jpg", roi)
+                    
+                    else: 
+                        # Recognition Mode
+                        roi = frame[y:y+bh, x:x+bw]
+                        if roi.size > 0:
+                            if should_process_ai and (frame_process_counter % (RECOGNITION_INTERVAL * process_stride) == 0):
+                                rec_worker.process(roi, idx)
+                                
+                            # Get latest results for ALL faces
+                            all_results = rec_worker.get_latest_results()
+                            if idx in all_results:
+                                final_name, score = all_results[idx]
+                                
+                                if score < THRESHOLD_MATCHES: final_name = "Unknown"
+                                
+                                d["name"] = final_name
+                                d["score"] = score
+                                
+                                # --- SECURITY LOGIC ---
+                                if final_name == "Unknown":
+                                    d["color"] = (0, 0, 255)
+                                    d["liveness_msg"] = ""
+                                    
+                                    if tuning["INTRUDER_ALERT"]:
+                                        state["intruder_timer"] += 1
+                                        if state["intruder_timer"] > 150: 
+                                            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                            path = os.path.join(SECURITY_LOG_DIR, f"intruder_{ts}.jpg")
+                                            cv2.imwrite(path, frame)
+                                            print(f"[!] Intruder Snapshot Saved: {path}")
+                                            state["intruder_timer"] = 0
+                                            state["latest_alert"] = f"Intruder Detected! ({datetime.now().strftime('%H:%M:%S')})"
+                                            d["liveness_msg"] = "ALERT: INTRUDER LOGGED"
+                                else:
+                                    state["intruder_timer"] = 0 
+                                    d["color"] = (0, 255, 0)
+                                    if idx == 0:
+                                        if state["liveness_state"] == "VERIFIED":
+                                            d["color"] = (0, 255, 0)
+                                            d["liveness_msg"] = "VERIFIED"
+                                        
+                                        elif state["liveness_state"] == "WAITING":
+                                            state["liveness_state"] = "CHALLENGE"
+                                            state["liveness_target"] = random.choice(["BLINK", "SMILE", "FROWN", "SURPRISE"])
+                                            state["liveness_timer"] = 0
+                                            d["color"] = (0, 255, 255)
+                                            d["liveness_msg"] = f"ACTION: {state['liveness_target']}"
+                                        
+                                        elif state["liveness_state"] == "CHALLENGE":
+                                            state["liveness_timer"] += 1
+                                            current_action = None
+                                            if "BLINKING" in d["blink"]: current_action = "BLINK"
+                                            elif "HAPPY" in d["emotion"]: current_action = "SMILE"
+                                            elif "FROWN" in d["emotion"]: current_action = "FROWN"
+                                            elif "SURPRISED" in d["emotion"]: current_action = "SURPRISE"
+                                            
+                                            if current_action == state["liveness_target"]:
+                                                state["liveness_state"] = "VERIFIED"
+                                                d["color"] = (0, 255, 0)
+                                                d["liveness_msg"] = "VERIFIED: AUTHORIZED"
+                                            
+                                            if state["liveness_timer"] > 90:
+                                                state["liveness_state"] = "WAITING"
+                                                d["liveness_msg"] = "FAILED: RETRY..."
+                                            else:
+                                                d["liveness_msg"] = f"ACTION: {state['liveness_target']}"
+                            
+                        cv2.rectangle(frame, (x, y), (x+bw, y+bh), d["color"], 2)
+                        cv2.putText(frame, f"{d['name']} ({int(d['score'])})", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, d["color"], 2)
+                        
+                        if d["liveness_msg"]:
+                             col = d["color"]
+                             cv2.putText(frame, d["liveness_msg"], (x, y+bh+50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2)
+                        elif d["emotion"]:
+                             cv2.putText(frame, f"{d['emotion']}", (x, y+bh+25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+            if state["enroll_mode"]:
+                draw_recording_overlay(frame, state["is_recording"], state["session_samples"])
+
+            ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
             frame = buffer.tobytes()
             yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            time.sleep(0.1) 
-            continue
-
-        success, frame = cap.read()
-        if not success: break
         
-        frame = cv2.flip(frame, 1)
-        h, w, _ = frame.shape
-        
-        frame_process_counter += 1
-        should_process_ai = (frame_process_counter % process_stride == 0)
-
-        # AI Processing
-        if should_process_ai:
-            # Optimization: Resize to 50% for faster inference (320x240)
-            # Normalized landmarks work on any scale, so no coordinate math changes needed!
-            small_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
-            rgb = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
-            last_results = face_mesh.process(rgb)
-        
-        # Drawing Logic (Uses last_results)
-        if last_results and last_results.multi_face_landmarks:
-            for face_landmarks in last_results.multi_face_landmarks:
-                lms = face_landmarks.landmark
-                
-                # Re-calculate lightweight math or reuse? 
-                # Calculating geometry is fast, MediaPipe is slow. 
-                # We can re-calc pose/ear on old landmarks mapped to new frame (approx)
-                # Or just cache the text strings. Let's re-calc to keep logic simple, 
-                # landmarks are static relative to head but head moves. 
-                # Actually, if we skip MediaPipe, lms are from previous frame.
-                
-                if should_process_ai:
-                    try: 
-                        p, y, r = get_head_pose(lms, w, h)
-                        cached_pose = f"P:{int(p)} Y:{int(y)}"
-                        
-                        # --- ATTENTION GUARD LOGIC ---
-                        # Relaxed Thresholds: Yaw > 50 or Pitch > 35
-                        # This allows looking at the screen with head slightly turned.
-                        if abs(y) > 50 or abs(p) > 35:
-                            state["privacy_mode"] = True
-                        else:
-                            state["privacy_mode"] = False
-                            
-                    except: 
-                        state["privacy_mode"] = False # Default to open if calculation fails
-                        pass
-                    
-                    l_ear = calculate_ear(lms, LEFT_EYE, w, h)
-                    r_ear = calculate_ear(lms, RIGHT_EYE, w, h)
-                    is_blinking = ((l_ear + r_ear) / 2.0) < BLINK_THRESHOLD
-                    cached_blink = "BLINKING" if is_blinking else "Eyes Open"
-                    cached_emotion = detect_emotion(lms)
-                
-                # Draw using cached or fresh data
-                x, y, bw, bh = get_stable_roi(lms, w, h)
-                cv2.rectangle(frame, (x, y), (x+bw, y+bh), (0, 255, 255), 2)
-                
-                roi = frame[y:y+bh, x:x+bw]
-                
-                if state["enroll_mode"]:
-                    if state["is_recording"] and roi.size > 0:
-                        # Only capture on processed frames to ensure quality
-                        if should_process_ai:
-                            state["frame_counter"] += 1
-                            if state["frame_counter"] % CAPTURE_EVERY_N_FRAMES == 0:
-                                des = compute_orb(roi)
-                                if des is not None:
-                                    nm = state["enroll_name"]
-                                    if nm not in db: db[nm] = []
-                                    db[nm].append(des)
-                                    state["session_samples"] += 1
-                                    if state["session_samples"] == 1:
-                                        cv2.imwrite(f"{KNOWN_DIR}/{nm}_thumb.jpg", roi)
-                
-                elif roi.size > 0:
-                    # Recognition Logic
-                    if should_process_ai and (frame_process_counter % (RECOGNITION_INTERVAL * process_stride) == 0):
-                        # Async Submit
-                        rec_worker.process(roi)
-                        
-                    # Always get latest (instant)
-                    final_name, score = rec_worker.get_latest_result()
-                    
-                    if True: # Logic block for drawing based on latest async result
-                        state["recent_names"].append(final_name)
-                        # Optional: Keep smoothing logic if desired, or trust the worker result
-                        # For simple async, just use final_name directly or smooth it.
-                        # Let's use final_name from worker directly for responsiveness.
-                        
-                        if score < THRESHOLD_MATCHES: final_name = "Unknown"
-                        
-                        # --- SECURITY LOGIC ---
-                        # 1. Intruder Alert
-                        if final_name == "Unknown":
-                            state["liveness_state"] = "WAITING" # Reset liveness
-                            cached_name = "Unknown"
-                            cached_color = (0, 0, 255)
-                            cached_liveness_msg = ""
-                            
-                            if tuning["INTRUDER_ALERT"]:
-                                state["intruder_timer"] += 1
-                                # Logic now runs every frame at ~30 FPS due to Async Worker.
-                                # To wait 5 seconds: 5 * 30 = 150 frames.
-                                if state["intruder_timer"] > 150: 
-                                    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                                    path = os.path.join(SECURITY_LOG_DIR, f"intruder_{ts}.jpg")
-                                    cv2.imwrite(path, frame)
-                                    print(f"[!] Intruder Snapshot Saved: {path}")
-                                    state["intruder_timer"] = 0 # Reset to avoid spam
-                                    cached_liveness_msg = "ALERT: INTRUDER LOGGED"
-                                    state["latest_alert"] = f"Intruder Detected! ({datetime.now().strftime('%H:%M:%S')})"
-                        
-                        # 2. Liveness Challenge
-                        else:
-                            state["intruder_timer"] = 0 # Reset intruder
-                            cached_name = final_name
-                            
-                            if state["liveness_state"] == "VERIFIED":
-                                cached_color = (0, 255, 0)
-                                cached_liveness_msg = "VERIFIED"
-                            
-                            elif state["liveness_state"] == "WAITING":
-                                state["liveness_state"] = "CHALLENGE"
-                                state["liveness_target"] = random.choice(["BLINK", "SMILE", "SURPRISE"])
-                                state["liveness_timer"] = 0
-                                cached_color = (0, 255, 255) # Yellow/Orange
-                                cached_liveness_msg = f"ACTION REQUIRED: {state['liveness_target']}"
-                            
-                            elif state["liveness_state"] == "CHALLENGE":
-                                state["liveness_timer"] += 1
-                                current_action = None
-                                if "BLINKING" in cached_blink: current_action = "BLINK"
-                                elif "HAPPY" in cached_emotion: current_action = "SMILE"
-                                elif "SURPRISED" in cached_emotion: current_action = "SURPRISE"
-                                
-                                if current_action == state["liveness_target"]:
-                                    state["liveness_state"] = "VERIFIED"
-                                    cached_color = (0, 255, 0)
-                                    cached_liveness_msg = "VERIFIED: ACCESS GRANTED"
-                                
-                                if state["liveness_timer"] > 90: # ~3 seconds timeout
-                                    state["liveness_state"] = "WAITING" # Retry
-                                    cached_liveness_msg = "FAILED: RETRYING..."
-                                else:
-                                    cached_liveness_msg = f"ACTION REQUIRED: {state['liveness_target']}"
-                                    
-                        cached_score = score
-                        
-                    
-                    cv2.rectangle(frame, (x, y), (x+bw, y+bh), cached_color, 2)
-                    cv2.putText(frame, f"{cached_name} ({int(cached_score)})", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, cached_color, 2)
-                    # Show Liveness/Security Message
-                    if cached_liveness_msg:
-                        col = (0, 255, 0) if "VERIFIED" in cached_liveness_msg else ((0, 0, 255) if "ALERT" in cached_liveness_msg else (0, 255, 255))
-                        cv2.putText(frame, cached_liveness_msg, (x, y+bh+50), cv2.FONT_HERSHEY_SIMPLEX, 0.7, col, 2)
-                    elif cached_emotion:
-                         cv2.putText(frame, f"{cached_emotion}", (x, y+bh+25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-        if state["enroll_mode"]:
-            draw_recording_overlay(frame, state["is_recording"], state["session_samples"])
-
-        ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
-        frame = buffer.tobytes()
-        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        except Exception as e:
+            print(f"[!] Critical Error in Video Loop: {e}")
+            import traceback
+            traceback.print_exc()
+            time.sleep(1)
 
     cap.release()
 
@@ -516,14 +526,40 @@ def command():
              return jsonify({"status": "Error: Not in Enrollment Mode"})
     
     elif cmd == 'clear_db':
+        # 1. Clear In-Memory DB and State
         db.clear()
-        save_db(db)
         state["recent_names"].clear()
+        state["liveness_state"] = "WAITING"
+        state["enroll_mode"] = False
+        state["is_recording"] = False
+        state["session_samples"] = 0
+        state["enroll_name"] = ""
+
+        # 2. Clear known faces
         for f in os.listdir(KNOWN_DIR):
             fp = os.path.join(KNOWN_DIR, f)
             if os.path.isfile(fp):
                 os.remove(fp)
-        return jsonify({"status": "Database Cleared"})
+        
+        # 3. Clear Security Logs (Intruder snapshots)
+        if os.path.exists(SECURITY_LOG_DIR):
+            for f in os.listdir(SECURITY_LOG_DIR):
+                fp = os.path.join(SECURITY_LOG_DIR, f)
+                if os.path.isfile(fp):
+                    os.remove(fp)
+
+        # 4. Clear Event Log
+        if os.path.exists(LOG_PATH):
+            os.remove(LOG_PATH)
+
+        # 5. Save empty DB state to disk
+        save_db(db)
+        
+        # 6. Update worker
+        rec_worker.update_db(db)
+        
+        print("[!] SYSTEM RESET: All data cleared.")
+        return jsonify({"status": "All Data & Logs Cleared"})
     
     elif cmd == 'toggle_camera':
         state['camera_active'] = not state['camera_active']
