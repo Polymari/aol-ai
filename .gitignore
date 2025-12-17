@@ -4,10 +4,8 @@
 # VSCode specific
 .vscode/
 
-# Data files
-data/
-
-known/
+data/*
+known/*
 
 # Python cache
 __pycache__/
